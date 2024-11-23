@@ -2,7 +2,7 @@ from environment import MultiCarRacing
 import numpy as np
 
 
-env = MultiCarRacing(n_cars=4, grid_size=30, track_width=5, num_checkpoints=12, render_mode='human')
+env = MultiCarRacing(n_cars=2, grid_size=30, track_width=5, num_checkpoints=12, render_mode='human')
 env.reset()
 
 print(env.checkpoints[0])

@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from agent import Car
+# from agent import Car
 import pygame
 
 GRID_SIZE = 30
@@ -14,6 +14,24 @@ GREEN = (124, 252, 0)  # Starting line color
 BLUE = (0, 0, 255)     # Finish line color
 GRAY = (128, 128, 128)  # Track color
 CAR_COLORS = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]  # Car colors (extendable)
+
+class Car:
+    def __init__(self, agent_id: int, ):
+        self.agent_id = agent_id
+        self.position = (0,0)
+        self.checkpoint_counters = 0
+        self.collision_counter = 0
+        self.reward = 0
+        self.done = False
+
+    def reset(self, position, observation):
+        self.position = position
+        self.checkpoint_counters = 0
+        self.collision_counter = 0
+        self.reward = 0
+        self.done = False
+        self.observation = observation
+
 
 
 def create_track_and_checkpoints(grid_size: int, track_width: int, num_checkpoints: int):
