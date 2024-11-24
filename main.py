@@ -8,9 +8,9 @@ env.reset()
 print(env.checkpoints[0])
 
 while True:
-    actions = {agent_id: np.random.randint(0,5) for agent_id in range(4)}  # Your action selection logic here
+    actions = {agent_id: np.random.randint(0,5) for agent_id in range(4)}  # random
     obs, rewards, dones, info = env.step(actions)
     env.render()
     print(rewards)
-    if any(dones.values()):
-        break
+    # if any(dones.values()):
+        # break
