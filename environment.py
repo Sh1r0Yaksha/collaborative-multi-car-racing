@@ -16,10 +16,9 @@ GRAY = (128, 128, 128)  # Track color
 CAR_COLORS = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]  # Car colors (extendable)
 
 class Car:
-    def __init__(self, start_pos, agent_id: int, teammate_id: int):
+    def __init__(self, agent_id: int, ):
         self.agent_id = agent_id
-        self.teammate_id = teammate_id
-        self.position = start_pos
+        self.position = (0,0)
         self.checkpoint_counters = 0
         self.collision_counter = 0
         self.reward = 0
@@ -111,13 +110,8 @@ class MultiCarRacing():
         # Initialize agents with starting positions
         self.agents = {}
         for agent_id in range(n_cars):
-            if (agent_id % 2 == 0):
-                teammate_id = agent_id + 1
-            else:
-                teammate_id = agent_id - 1
             start_pos = self.start_line[agent_id % len(self.start_line)]
-            self.agents[agent_id] = Car(start_pos, agent_id, teammate_id)
-
+            self.agents[agent_id] = Car(start_pos)
 
         self.action_space = {agent_id: [0, 1, 2, 3, 4] for agent_id in range(n_cars)}
         self.observation_space = {
@@ -156,7 +150,7 @@ class MultiCarRacing():
 
         intended_position = {agent_id: agent.position for agent_id, agent in self.agents.items()}
 
-        # Check Valid Position 
+        # Position Update
         for agent_id, agent in self.agents.items():
             if self.dones[agent_id]:
                 pass # Add dead step here
@@ -189,47 +183,19 @@ class MultiCarRacing():
                         other_agent.collision_counter = 2
                 
             
-        # Position update
-        for agent_id, agent in self.agents.items():
-            agent.position = intended_position[agent_id]
+            # Reward update
+            for agent_id, agent in self.agents.items():
+                agent.position = intended_position[agent_id]
 
-            # Reward on reaching checkpont
-            if agent.position in self.checkpoints[agent.checkpoint_counters]:
-                agent.reward += 5
-                agent.checkpoint_counters += 1
+                if agent.position in self.checkpoints[agent.checkpoint_counters]:
+                    agent.reward += 5
+                    agent.checkpoint_counters += 1
 
-                if agent.checkpoint_counters >= len(self.checkpoints):
-                    agent.reward += 1000
-                    agent.done = True
-                    agent.checkpoint_counters = 0
-            
-            # Penalty when time taken
-            if not agent.done:
-                agent.reward -= 0.1
-
-            agent.observation = self.get_observation(agent_id)
-            self.dones[agent_id] = agent.done
-
-        for agent_id, agent in self.agents.items():
-            # Reward when teammate reaches goal
-            if self.dones[agent.teammate_id]:
-                agent.reward += 500
-
-            # Penalty for enemy
-            for other_id, other_agent in self.agents.items():
-                if other_id != agent_id and other_id != agent.teammate_id:
-                    # If enemy reaches goal
-                    if self.dones[other_id]:
-                        print(f'for agent: {agent_id} enemy {other_id} reached goal')
-                        agent.reward -= 1000
-
-                    # If enemy is ahead by a checkpoint
-                    if other_agent.checkpoint_counters > agent.checkpoint_counters:
-                        agent.reward -= 1
-                    
-                    # If enemy is ahead of teammate
-                    if other_agent.checkpoint_counters > self.agents[agent.teammate_id].checkpoint_counters:
-                        agent.reward -= 0.5
+                    if agent.checkpoint_counters >= len(self.checkpoints):
+                        agent.done = True
+                        agent.checkpoint_counters = 0
+                agent.observation = self.get_observation(agent_id)
+                self.dones[agent_id] = agent.done
             
         observations = {
             agent_id: agent.observation for agent_id, agent in self.agents.items()
@@ -383,3 +349,4 @@ class MultiCarRacing():
         
         return observation
             
+
