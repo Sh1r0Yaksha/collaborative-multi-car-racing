@@ -70,8 +70,8 @@ class MADQN:
         
         self.epsilon = 1.0
         self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
-        self.gamma = 0.99
+        self.epsilon_decay = 0.999
+        self.gamma = 0.95
         self.batch_size = 64
         self.target_update_frequency = 10
         self.update_counter = 0
@@ -163,12 +163,13 @@ def train_madqn():
                     next_obs[agent_id].flatten(),
                     dones[agent_id]
                 )
-                episode_rewards[agent_id] += rewards[agent_id]
+                episode_rewards[agent_id] = rewards[agent_id]
             
             for agent_id in range(n_agents):
                 madqn.update(agent_id)
             
             obs = next_obs
+            env.render()
             
             if any(dones.values()):
                 break
@@ -204,4 +205,5 @@ def train_madqn():
 
 if __name__ == "__main__":
     train_madqn()
+    
     
