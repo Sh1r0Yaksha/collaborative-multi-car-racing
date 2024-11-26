@@ -164,6 +164,7 @@ def train_madqn():
                     dones[agent_id]
                 )
                 episode_rewards[agent_id] = rewards[agent_id]
+        
             
             for agent_id in range(n_agents):
                 madqn.update(agent_id)

@@ -135,15 +135,17 @@ class MultiCarRacing():
         # Reset each agent to its starting position
         for agent_id, agent in self.agents.items():
             start_pos = self.start_line[agent_id % len(self.start_line)]
-            agent.position = start_pos
-            agent.checkpoint_counters = 0
-            agent.collision_counter = 0
-            agent.done = False
+            
+            # agent.position = start_pos
+            # agent.checkpoint_counters = 0
+            # agent.collision_counter = 0
+            # agent.done = False
+            agent.reset(start_pos, self.get_observation(agent_id))
         
         self.rewards = {agent_id: 0 for agent_id in self.agents}
         self.dones = {agent_id: False for agent_id in self.agents}
         
-        return {agent_id: self.get_observation(agent_id) for agent_id in self.agents}
+        return {agent_id: agent.observation for agent_id, agent in self.agents.items()}
     
     def step(self, action_dict):
 
@@ -381,9 +383,9 @@ class MultiCarRacing():
             else:
                 # If teammate 2
                 if (agent_id // 2) == (other_agent_id // 2):
-                    observation[pos[0], pos[1]] = 2
+                    observation[pos[0], pos[1]] = 3
                 # If enemy 3
                 else:
-                    observation[pos[0], pos[1]] = 3
+                    observation[pos[0], pos[1]] = 4
         
         return observation
