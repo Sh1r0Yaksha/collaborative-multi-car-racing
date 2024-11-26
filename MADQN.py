@@ -28,7 +28,11 @@ class DQNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(128, output_dim)
         ).to(device)
+<<<<<<< HEAD
+
+=======
     
+>>>>>>> 769659f7e8a5e902175b74b7b1ce6afa5438a0fb
     def forward(self, x):
         return self.network(x)
 
