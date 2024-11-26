@@ -9,7 +9,11 @@ import random
 from torch.utils.tensorboard import SummaryWriter
 import os
 from datetime import datetime
+import json
 
+# Set device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 # Experience replay memory tuple
 Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state', 'done'])
@@ -23,7 +27,7 @@ class DQNetwork(nn.Module):
             nn.Linear(128, 128),
             nn.ReLU(),
             nn.Linear(128, output_dim)
-        )
+        ).to(device)
     
     def forward(self, x):
         return self.network(x)
@@ -38,11 +42,21 @@ class ReplayBuffer:
     
     def sample(self, batch_size):
         experiences = random.sample(self.buffer, batch_size)
-        states = torch.FloatTensor([exp.state for exp in experiences])
-        actions = torch.LongTensor([exp.action for exp in experiences])
-        rewards = torch.FloatTensor([exp.reward for exp in experiences])
-        next_states = torch.FloatTensor([exp.next_state for exp in experiences])
-        dones = torch.FloatTensor([exp.done for exp in experiences])
+        
+        # Convert to numpy arrays first, then to tensors
+        states = np.array([exp.state for exp in experiences])
+        actions = np.array([exp.action for exp in experiences])
+        rewards = np.array([exp.reward for exp in experiences])
+        next_states = np.array([exp.next_state for exp in experiences])
+        dones = np.array([exp.done for exp in experiences])
+        
+        # Convert numpy arrays to tensors and move to GPU in one operation
+        states = torch.FloatTensor(states).to(device)
+        actions = torch.LongTensor(actions).to(device)
+        rewards = torch.FloatTensor(rewards).to(device)
+        next_states = torch.FloatTensor(next_states).to(device)
+        dones = torch.FloatTensor(dones).to(device)
+        
         return states, actions, rewards, next_states, dones
     
     def __len__(self):
@@ -83,7 +97,7 @@ class MADQN:
             if random.random() < self.epsilon:
                 actions[agent_id] = random.randint(0, self.action_dim - 1)
             else:
-                state = torch.FloatTensor(states[agent_id]).unsqueeze(0)
+                state = torch.FloatTensor(states[agent_id]).unsqueeze(0).to(device)
                 with torch.no_grad():
                     q_values = self.q_networks[agent_id](state)
                     actions[agent_id] = q_values.argmax().item()
@@ -123,7 +137,67 @@ class MADQN:
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
         self.training_step += 1
 
-def train_madqn():
+    def save_model(self, save_dir, episode):
+        """Save model checkpoints and training state"""
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+            
+        # Save model checkpoints for each agent
+        checkpoint = {
+            'episode': episode,
+            'epsilon': self.epsilon,
+            'training_step': self.training_step,
+            'models': {},
+            'optimizers': {}
+        }
+        
+        for agent_id in range(self.n_agents):
+            # Save Q-network state
+            checkpoint['models'][f'agent_{agent_id}'] = self.q_networks[agent_id].state_dict()
+            # Save optimizer state
+            checkpoint['optimizers'][f'agent_{agent_id}'] = self.optimizers[agent_id].state_dict()
+        
+        checkpoint_path = os.path.join(save_dir, f'checkpoint_episode_{episode}.pth')
+        torch.save(checkpoint, checkpoint_path)
+        print(f"Saved checkpoint to {checkpoint_path}")
+        
+        # Save training configuration
+        config = {
+            'n_agents': self.n_agents,
+            'state_dim': self.state_dim,
+            'action_dim': self.action_dim,
+            'epsilon': self.epsilon,
+            'epsilon_min': self.epsilon_min,
+            'epsilon_decay': self.epsilon_decay,
+            'gamma': self.gamma,
+            'batch_size': self.batch_size,
+            'target_update_frequency': self.target_update_frequency
+        }
+        
+        config_path = os.path.join(save_dir, 'config.json')
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=4)
+    
+    def load_model(self, checkpoint_path):
+        """Load model checkpoints and training state"""
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
+            
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        
+        # Load model parameters and optimizer states
+        for agent_id in range(self.n_agents):
+            self.q_networks[agent_id].load_state_dict(checkpoint['models'][f'agent_{agent_id}'])
+            self.target_networks[agent_id].load_state_dict(checkpoint['models'][f'agent_{agent_id}'])
+            self.optimizers[agent_id].load_state_dict(checkpoint['optimizers'][f'agent_{agent_id}'])
+        
+        self.epsilon = checkpoint['epsilon']
+        self.training_step = checkpoint['training_step']
+        
+        print(f"Loaded checkpoint from episode {checkpoint['episode']}")
+        return checkpoint['episode']
+
+def train_madqn(max_steps = 1000, n_episodes = 1000, save_dir='checkpoints', save_frequency=100):
     # Create unique run name with timestamp
     current_time = datetime.now().strftime('%Y%m%d-%H%M%S')
     log_dir = os.path.join('runs', f'MADQN_{current_time}')
@@ -131,17 +205,12 @@ def train_madqn():
     
     env = MultiCarRacing(n_cars=2, grid_size=30, track_width=5, num_checkpoints=12, render_mode=None)
     n_agents = 2
-    state_dim = 30 * 30  #observation space is the grid size
-    action_dim = 5  # Number of possible actions - up, down, left, right and stay
+    state_dim = 30 * 30
+    action_dim = 5
     
-    # Initialize MADQN with TensorBoard writer
     madqn = MADQN(n_agents, state_dim, action_dim, writer)
     
-    n_episodes = 1000
-    max_steps = 500
-    
-    # Lists to store metrics for plotting
-    all_episode_rewards = []
+    best_avg_reward = float('-inf')
     
     for episode in range(n_episodes):
         obs = env.reset()
@@ -154,7 +223,6 @@ def train_madqn():
             actions = madqn.select_action(states)
             next_obs, rewards, dones, info = env.step(actions)
             
-            # Store experiences and update
             for agent_id in range(n_agents):
                 madqn.replay_buffers[agent_id].push(
                     states[agent_id],
@@ -164,29 +232,28 @@ def train_madqn():
                     dones[agent_id]
                 )
                 episode_rewards[agent_id] = rewards[agent_id]
-        
             
             for agent_id in range(n_agents):
                 madqn.update(agent_id)
             
             obs = next_obs
-            env.render()
             
             if any(dones.values()):
                 break
         
-        # Log episode metrics to TensorBoard
+        # Log metrics
+
+        #Log episode metrics to TensorBoard
         for agent_id in range(n_agents):
             writer.add_scalar(f'Rewards/agent_{agent_id}', episode_rewards[agent_id], episode)
             writer.add_scalar(f'Steps/agent_{agent_id}', episode_steps, episode)
         
         writer.add_scalar('Training/epsilon', madqn.epsilon, episode)
         writer.add_scalar('Training/episode_length', episode_steps, episode)
-        
-        # Calculate and log average reward across all agents
+
         avg_reward = sum(episode_rewards.values()) / n_agents
         writer.add_scalar('Rewards/average', avg_reward, episode)
-        
+
         # Log checkpoints reached and other custom metrics if available in info
         if info:
             for agent_id in range(n_agents):
@@ -195,16 +262,106 @@ def train_madqn():
                                     info['checkpoints_reached'].get(agent_id, 0), 
                                     episode)
         
-        # Print episode statistics
+        # Save checkpoints
+        if (episode + 1) % save_frequency == 0:
+            madqn.save_model(save_dir, episode + 1)
+        
+        # Save best model
+        if avg_reward > best_avg_reward:
+            best_avg_reward = avg_reward
+            madqn.save_model(os.path.join(save_dir, 'best_model'), episode + 1)
+        
         print(f"Episode {episode + 1}")
-        for agent_id in range(n_agents):
+        for agent_id in range(madqn.n_agents):
             print(f"Agent {agent_id} total reward: {episode_rewards[agent_id]}")
+        print(f"Average Reward: {avg_reward:.2f}")
         print(f"Epsilon: {madqn.epsilon}")
         print("--------------------")
     
     writer.close()
+    return madqn
+
+def test_madqn(checkpoint_path, n_episodes=100, render=True):
+    """Test a trained MADQN model"""
+    # Create unique run name with timestamp
+    current_time = datetime.now().strftime('%Y%m%d-%H%M%S')
+    log_dir = os.path.join('runs', f'MADQN_{current_time}')
+    writer = SummaryWriter(log_dir)
+    # Load configuration
+    config_path = os.path.join(os.path.dirname(checkpoint_path), 'config.json')
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    
+    # Initialize environment and agent
+    env = MultiCarRacing(
+        n_cars=config['n_agents'],
+        grid_size=30,
+        track_width=5,
+        num_checkpoints=12,
+        render_mode='human' if render else None
+    )
+    
+    madqn = MADQN(
+        writer=writer,
+        n_agents=config['n_agents'],
+        state_dim=config['state_dim'],
+        action_dim=config['action_dim']
+    )
+    
+    # Load trained model
+    madqn.load_model(checkpoint_path)
+    
+    # Set epsilon to minimum for testing (mostly exploiting)
+    madqn.epsilon = 0.01
+    
+    total_rewards = []
+    checkpoints_reached = []
+    
+    for episode in range(n_episodes):
+        obs = env.reset()
+        episode_rewards = {i: 0 for i in range(madqn.n_agents)}
+        done = False
+        
+        while not done:
+            states = {i: obs[i].flatten() for i in range(madqn.n_agents)}
+            actions = madqn.select_action(states)
+            obs, rewards, dones, info = env.step(actions)
+            
+            for agent_id in range(madqn.n_agents):
+                episode_rewards[agent_id] += rewards[agent_id]
+            
+            if render:
+                env.render()
+            
+            done = any(dones.values())
+        
+        avg_reward = sum(episode_rewards.values()) / madqn.n_agents
+        total_rewards.append(avg_reward)
+        
+        if 'checkpoints_reached' in info:
+            checkpoints_reached.append(sum(info['checkpoints_reached'].values()) / madqn.n_agents)
+        
+        print(f"Episode {episode + 1}")
+        for agent_id in range(madqn.n_agents):
+            print(f"Agent {agent_id} total reward: {episode_rewards[agent_id]}")
+        # print(f"Average Reward: {avg_reward:.2f}")
+        if checkpoints_reached:
+            print(f"Average Checkpoints: {checkpoints_reached[-1]:.2f}")
+        print("--------------------")
+    
+    # Print test results
+    print("\nTest Results:")
+    print(f"Average Reward over {n_episodes} episodes: {np.mean(total_rewards):.2f} ± {np.std(total_rewards):.2f}")
+    if checkpoints_reached:
+        print(f"Average Checkpoints: {np.mean(checkpoints_reached):.2f} ± {np.std(checkpoints_reached):.2f}")
+
 
 if __name__ == "__main__":
-    train_madqn()
+    # train_madqn()
+    # Training
+    madqn = train_madqn(n_episodes=1000, max_steps=3000, save_dir='checkpoints', save_frequency=100)
     
+    # Testing
+    # Uncomment and modify path to test a specific checkpoint
+    # test_madqn('checkpoints/best_model/checkpoint_episode_10.pth', n_episodes=10, render=True)
     
